@@ -69,6 +69,22 @@ def pump_status():
     dpg.configure_item("server_status", default_value=f"● {server_status_text}")
     dpg.configure_item("server_status", color=server_status_color)
 
+def select_directory_native():
+  import tkinter as tk
+  from tkinter import filedialog
+
+  
+  root = tk.Tk()
+  root.withdraw()
+  root.attributes('-topmost', True)
+
+  folder_selected = filedialog.askdirectory()
+
+  root.destroy()
+
+  if folder_selected:
+    dpg.set_value("file_directory", folder_selected)
+
 def close_banner():
   dpg.hide_item("warning_banner")
 
@@ -100,15 +116,9 @@ def main():
     ngrok_token = dpg.add_input_text(tag="ngrok_auth_token", label="Ngrok Auth Token", password=True, width=-1)
 
     add_header("Select a directory to host:", 3)
-    def directory_output(sender, app_data):
-      dpg.set_value(directory, app_data["file_path_name"])
-    
-    dpg.add_file_dialog(
-      directory_selector=True, show=False, callback=directory_output, tag="file_dialog_id",
-      cancel_callback=cancel_callback, width=700 ,height=400)
 
     directory = dpg.add_input_text(tag="file_directory", multiline=False, readonly=True, width=-1)
-    dpg.add_button(label="Select directory", callback=lambda: dpg.show_item("file_dialog_id"))
+    dpg.add_button(label="Select directory", callback=select_directory_native)
 
     dpg.add_text("● Server offline", tag="server_status", color=server_status_color)
 

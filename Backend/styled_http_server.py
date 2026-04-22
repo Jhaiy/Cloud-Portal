@@ -6,6 +6,8 @@ from urllib.parse import quote
 import argparse
 import io
 import os
+import mimetypes
+import re
 
 
 PAGE_STYLE = """
@@ -187,7 +189,60 @@ PAGE_STYLE = """
 
 
 class StyledHTTPRequestHandler(SimpleHTTPRequestHandler):
+  def end_headers(self):
+    self.send_header("ngrok-skip-browser-warning", "any-value")
+    self.send_header("Accept-Ranges", "bytes")
+    super().end_headers()
+
+  def guess_type(self, path):
+    base_type = super().guess_type(path)
+    if path.endswith('.mp4'): return 'video/mp4'
+    return base_type
+  
+  def do_GET(self):
+    """Override GET to handle Byte-Range requests for video seeking/playing."""
+    if "Range" in self.headers and not self.path.endswith(('/', '.html', '.css')):
+      self.handle_range_request()
+    else:
+      super().do_GET()
+
+  def handle_range_request(self):
+    """Standard boilerplate for handling video range requests."""
+    path = self.translate_path(self.path)
+    if not os.path.isfile(path):
+      self.send_error(404)
+      return
+    
+    size = os.path.getsize(path)
+    range_header = self.headers.get('Range')
+    match = re.match(r'bytes=(\d+)-(\d+)?', range_header)
+
+    if not match:
+      self.send_error(400, "Invalid Range")
+      return
+    
+    start = int(match.group(1))
+    end = int(match.group(2)) if match.group(2) else size - 1
+
+    if start >= size:
+      self.send_error(416, "Requested Range Not Satisfied")
+      return
+    
+    chunk_size = end - start + 1
+
+    self.send_response(206)
+    self.send_header("Content-Type", self.guess_type(path))
+    self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+    self.send_header("Content-Length", str(chunk_size))
+    self.end_headers()
+
+    with open(path, 'rb') as f:
+      f.seek(start)
+      self.wfile.write(f.read(chunk_size))
+
   def list_directory(self, path):
+    VIDEO_EXTS = {'.mp4', '.webm', '.ogg', '.mov'}
+
     try:
       entries = sorted(
         os.listdir(path),
@@ -229,9 +284,23 @@ class StyledHTTPRequestHandler(SimpleHTTPRequestHandler):
         )
       else:
         size = f"{os.path.getsize(full_path):,} B"
-        main_tiles.append(
-          f'<a class="tile" href="{href}"><div class="icon">📄</div><div class="name">{display_name}</div><div class="meta">{size}</div></a>'
-        )
+        ext = Path(name).suffix.lower()
+        if ext in VIDEO_EXTS:
+          main_tiles.append(
+            f'<a class="tile" href="{href}" target="_blank">'
+            f'<div class="icon">🎬</div>'
+            f'<div class="name">{display_name}</div>'
+            f'<div class="meta">{size}</div>'
+            f'</a>'
+          )
+        else:
+          main_tiles.append(
+            f'<a class="tile" href="{href}" target="_blank">'
+            f'<div class="icon">📄</div>'
+            f'<div class="name">{display_name}</div>'
+            f'<div class="meta">{size}</div>'
+            f'</a>'
+          )
 
     sidebar_html = "\n".join(sidebar_items) if sidebar_items else '<div class="meta">No folders</div>'
     main_html = "\n".join(main_tiles) if main_tiles else '<div class="meta">This folder is empty.</div>'
