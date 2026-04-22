@@ -164,6 +164,7 @@ cloud-portal/
 - Do **not** serve sensitive or private files unless you understand the risk
 - Ngrok free tier URLs are temporary and change each session — your link expires when you stop the server
 - For persistent or authenticated access, consider upgrading to a paid Ngrok plan
+- I will not allow any executables to run on your server for obvious security reasons for users. However this can change soon enough if the user decides to dismiss any security precautions by the App.
 
 ---
 
