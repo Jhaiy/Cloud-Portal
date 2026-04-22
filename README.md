@@ -171,7 +171,10 @@ cloud-portal/
 
 - [ ] Custom port configuration
 - [ ] Upload support (let remote users upload files to your server)
-- [ ] Basic HTTP authentication (username/password protection)
+- [ ] Basic HTTP authentication (password protection) if you want a secured access to your server.
+- [ ] Encrypted connections and file uploads for security
+- [ ] File safety checker (Checks files before upload for any suspicious stuff)
+- [ ] Activity logging for uploads and accessing. (Fetches I.P. and other information but this will only be saved on your local machine and no suspicious backdoors)
 - [ ] Custom server name / branding
 - [ ] Auto-copy public URL to clipboard on start
 - [ ] System tray minimization
