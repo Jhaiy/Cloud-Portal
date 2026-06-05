@@ -123,6 +123,23 @@ PAGE_STYLE = """
     gap: 14px;
   }
 
+  .search {
+    margin-bottom: 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .search input[type="search"] {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+    color: var(--text);
+    outline: none;
+  }
+
   .tile {
     display: flex;
     flex-direction: column;
@@ -200,45 +217,79 @@ class StyledHTTPRequestHandler(SimpleHTTPRequestHandler):
     return base_type
   
   def do_GET(self):
-    """Override GET to handle Byte-Range requests for video seeking/playing."""
-    if "Range" in self.headers and not self.path.endswith(('/', '.html', '.css')):
+    """Treat video files as streamable or handle explicit Range requests."""
+    path_on_disk = self.translate_path(self.path)
+    ext = Path(path_on_disk).suffix.lower()
+    VIDEO_EXTS = {'.mp4', '.webm', '.ogg', '.mov'}
+    if "Range" in self.headers or ext in VIDEO_EXTS:
       self.handle_range_request()
     else:
       super().do_GET()
 
   def handle_range_request(self):
-    """Standard boilerplate for handling video range requests."""
+    """Handle byte-range requests and stream files in chunks (sendfile fast-path).
+
+    Accepts missing Range headers (streams whole file starting at 0) to
+    allow browsers to begin playback immediately for large video files.
+    """
     path = self.translate_path(self.path)
     if not os.path.isfile(path):
       self.send_error(404)
       return
-    
+
     size = os.path.getsize(path)
     range_header = self.headers.get('Range')
-    match = re.match(r'bytes=(\d+)-(\d+)?', range_header)
+    match = re.match(r'bytes=(\d+)-(\d+)?', range_header) if range_header else None
 
-    if not match:
-      self.send_error(400, "Invalid Range")
-      return
-    
-    start = int(match.group(1))
-    end = int(match.group(2)) if match.group(2) else size - 1
+    if match:
+      start = int(match.group(1))
+      end = int(match.group(2)) if match.group(2) else size - 1
+      status = 206
+    else:
+      start = 0
+      end = size - 1
+      status = 200
 
     if start >= size:
       self.send_error(416, "Requested Range Not Satisfied")
       return
-    
+
     chunk_size = end - start + 1
 
-    self.send_response(206)
+    self.send_response(status)
     self.send_header("Content-Type", self.guess_type(path))
-    self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
+    if status == 206:
+      self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
     self.send_header("Content-Length", str(chunk_size))
+    self.send_header("Accept-Ranges", "bytes")
     self.end_headers()
 
-    with open(path, 'rb') as f:
-      f.seek(start)
-      self.wfile.write(f.read(chunk_size))
+    try:
+      with open(path, 'rb') as f:
+        f.seek(start)
+        remaining = chunk_size
+        sock = getattr(self, "connection", None)
+        if sock is not None and hasattr(sock, "sendfile"):
+          while remaining > 0:
+            to_send = min(64 * 1024, remaining)
+            try:
+              sent = sock.sendfile(f, offset=f.tell(), count=to_send)
+            except (BlockingIOError, OSError):
+              break
+            if not sent:
+              break
+            remaining -= sent
+        if remaining > 0:
+          f.seek(f.tell())
+          bufsize = 64 * 1024
+          while remaining > 0:
+            data = f.read(min(bufsize, remaining))
+            if not data:
+              break
+            self.wfile.write(data)
+            remaining -= len(data)
+    except Exception:
+      pass
 
   def list_directory(self, path):
     VIDEO_EXTS = {'.mp4', '.webm', '.ogg', '.mov'}
@@ -325,11 +376,39 @@ class StyledHTTPRequestHandler(SimpleHTTPRequestHandler):
         <div class="dir-list">{sidebar_html}</div>
       </aside>
       <main class="main">
+        <div class="search">
+          <input id="searchBox" type="search" placeholder="Search files and folders..." aria-label="Search files" />
+        </div>
         <div class="grid">{main_html}</div>
       </main>
     </div>
     <div class="footer">Cloud Portal file server</div>
   </div>
+  <script>
+    (function(){{
+      const search = document.getElementById('searchBox');
+      if(!search) return;
+      const tiles = () => Array.from(document.querySelectorAll('.grid .tile'));
+      const links = () => Array.from(document.querySelectorAll('.dir-list .dir-link'));
+
+      function normalize(s){{ return (s||'').toLowerCase(); }}
+
+      search.addEventListener('input', function(e){{
+        const q = normalize(e.target.value.trim());
+        // filter tiles
+        tiles().forEach(t => {{
+          const nameEl = t.querySelector('.name');
+          const txt = normalize(nameEl && nameEl.textContent);
+          t.style.display = q === '' || txt.includes(q) ? '' : 'none';
+        }});
+        // filter sidebar links
+        links().forEach(a => {{
+          const txt = normalize(a.textContent);
+          a.style.display = q === '' || txt.includes(q) ? '' : 'none';
+        }});
+      }});
+    }})();
+  </script>
 </body>
 </html>"""
 

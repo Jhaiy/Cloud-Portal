@@ -130,7 +130,8 @@ def stream_process(cmd, log, cwd=None):
     stderr=subprocess.STDOUT, 
     text=True, 
     bufsize=1,
-    cwd=cwd
+    cwd=cwd,
+    creationflags=CREATE_NO_WINDOW #Delete this for a debug mode.
   )
 
   for line in process.stdout:
